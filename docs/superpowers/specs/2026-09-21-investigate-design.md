@@ -1,14 +1,14 @@
-# Nivesh — Design Spec
+# InvestiGate — Design Spec
 
 **Status:** Draft for review
 **Date:** 2026-09-21
-**Working title:** Nivesh (निवेश, "investment") — rename freely.
+**Name:** InvestiGate — *invest* + *investigate*. "Investigate before you invest."
 
 ---
 
 ## 1. Purpose
 
-Nivesh is an agentic RAG system for Indian equity research. It reads a real
+InvestiGate is an agentic RAG system for Indian equity research. It reads a real
 brokerage portfolio, grounds its analysis in primary source documents
 (annual reports, filings, earnings-call transcripts), and produces a
 portfolio review where every number is traceable to a deterministic source
@@ -156,7 +156,7 @@ PortfolioSnapshot { as_of: datetime, source: str, holdings: list[Holding] }
 ```
 
 **Depends on:** a self-hosted OpenAlgo instance, authenticated to the user's
-broker. Nivesh never handles broker credentials directly — it only calls
+broker. InvestiGate never handles broker credentials directly — it only calls
 OpenAlgo's local REST API.
 
 **Critical constraint.** Indian broker tokens expire nightly by regulation,
@@ -392,4 +392,7 @@ Requirements:
    coverage and reliability unknown, needs a spike.
 3. Embedding model choice — dimensionality, cost and Indian-financial-English
    performance. A candidate for a measured comparison in Phase 2.
-4. Repository name — `nivesh` is a working title.
+4. Repository name — `investigate` is generic enough that GitHub search
+   discoverability is weak. Names are unique per-user so the repo itself is
+   fine; the README title, repo description and topic tags carry the
+   keywords instead.
