@@ -104,23 +104,24 @@ This boundary is a load-bearing design decision, not an optimization.
     broker auth)    │  → snapshot cache (JSON)     │
                     └──────────────┬───────────────┘
                                    │
-   yfinance / APIs ───────────────▶│  Structured facts store (Postgres)
-                                   │  numbers ONLY, never embedded
+   yfinance / APIs ───────────────▶│  Facts payload (in-memory JSON)
+                                   │  numbers ONLY, never embedded,
+                                   │  never persisted
                                    │
    Filings, annual   ┌─────────────▼───────────────┐
-   reports, calls ──▶│  Ingestion (Temporal)       │
+   reports, calls ──▶│  Ingestion (LangGraph)      │
                      │  parse → chunk → embed      │
                      └─────────────┬───────────────┘
                                    │
                      ┌─────────────▼───────────────┐
-                     │  Hybrid index               │
+                     │  Hybrid index  (Postgres)   │
                      │  pgvector (dense)           │
                      │  Elasticsearch (BM25)       │
                      │  → RRF → cross-encoder      │
                      └─────────────┬───────────────┘
                                    │
                      ┌─────────────▼───────────────┐
-                     │  Agent layer                │
+                     │  Agent layer (LangGraph)    │
                      │  analyst → red-team critic  │
                      └─────────────┬───────────────┘
                                    │
@@ -168,14 +169,26 @@ On failure the dashboard renders the cached snapshot with a visible banner:
 `as of <timestamp> — broker session expired, reconnect to refresh`. This is
 one file and one timestamp, not a history feature.
 
-### 5.2 Structured facts store
+### 5.2 Facts payload (no database)
 
-**Does:** holds all numeric data — prices, ratios, growth rates, margins,
-analyst spreads.
+**Does:** assembles all numeric data — prices, ratios, growth rates, margins,
+analyst spreads, plus the pre-computed derived values from §5.6 — into a
+single JSON structure for one request.
 
-**Why Postgres and not the vector store:** these values are queried exactly,
-not semantically, and they are the inputs the grounding validator checks the
-model's output against. They must be addressable as data, not as text.
+**Interface:** `build_facts(holdings) -> dict`
+
+**Not persisted.** Fetched on demand, passed to the model, handed to the
+grounding validator, discarded. The validator compares model output against
+the payload that was just built in memory; nothing needs to survive the
+request for that to work.
+
+**Consequence: Phases 0 and 1 require no database at all.** Postgres enters
+only at Phase 2, and only for the vector index — because 300-page annual
+reports cannot be re-parsed and re-embedded on every request, while numbers
+can be re-fetched freely. Documents get persisted; numbers do not.
+
+Time-series history over facts would need storage, but that is an explicit
+non-goal (§2).
 
 ### 5.3 Ingestion pipeline
 
@@ -192,11 +205,17 @@ model's output against. They must be addressable as data, not as text.
 - **Metadata per chunk (mandatory, enables citation):**
   `{ company, ticker, doc_type, fiscal_year, page_no, section_heading, chunk_id }`
 
-**Orchestration:** Temporal, introduced here in Phase 2. Ingestion is
-long-running, partially failing and resumable — exactly what durable workflows
-are for, and it leverages existing expertise rather than learning a new
-orchestrator. Phase 4 extends the same Temporal deployment to agent workflows;
-it is not a new dependency at that point.
+**Orchestration:** LangGraph, introduced here in Phase 2. Ingestion is
+long-running and partially failing, so it runs as a graph with a Postgres
+checkpointer — failed documents resume from their last completed node rather
+than re-parsing the batch. Phase 4 reuses the same LangGraph runtime for the
+agent workflows, so it is not a new dependency at that point.
+
+Note the durability tradeoff versus a dedicated execution engine: LangGraph
+checkpoints graph state, but it is not Temporal-grade durable execution and
+will not survive every class of process failure as cleanly. Acceptable here —
+ingestion is restartable and idempotent by document, and the orchestration
+learning goal points at agent-native tooling (§9.5).
 
 ### 5.4 Hybrid retrieval
 
@@ -311,11 +330,11 @@ Each phase ends in something that works and is worth writing about.
 
 | Phase | Deliverable | Learning focus |
 |---|---|---|
-| **0** | Holdings → canonical schema → cached snapshot → dashboard. No AI. | Connector design, cache-on-expiry |
-| **1** | Structured fast pass + grounding validator + tests | Structured outputs, hallucination gating |
-| **2** | RAG core: ingest (on Temporal) → pgvector + BM25 → RRF → rerank → citations | **The retrieval centerpiece** |
+| **0** | Holdings → canonical schema → cached snapshot → dashboard. No AI, no DB. | Connector design, cache-on-expiry |
+| **1** | Structured fast pass + grounding validator + tests. Still no DB. | Structured outputs, hallucination gating |
+| **2** | RAG core: ingest (LangGraph) → pgvector + BM25 → RRF → rerank → citations. First database. | **The retrieval centerpiece** |
 | **3** | Golden set + eval harness + CI regression | **The employability multiplier** |
-| **4** | Agentic deep dive: tool-calling analyst + red-team critic, reusing the Phase 2 Temporal deployment | Agent orchestration, durable workflows |
+| **4** | Agentic deep dive: tool-calling analyst + red-team critic, reusing the Phase 2 LangGraph runtime | Agent orchestration, graph state, checkpointing |
 | **5** | Observability, cost/latency, public architecture writeup | Production AI discipline |
 
 Phases 0-3 are the core. 4-5 are what make it senior-looking.
@@ -327,13 +346,19 @@ months.
 
 ## 9. Key decisions and rejected alternatives
 
-### 9.1 Primitives over a RAG framework
-LlamaIndex/LangChain reach a working pipeline far faster. Rejected for the
-core retrieval path because the abstractions hide precisely the mechanics
-this project exists to learn, and because the resume already claims RAG — it
-needs to survive interview probing, where `.as_query_engine()` is a bad
-answer. A framework port as an explicit comparison remains a possible later
-phase.
+### 9.1 Primitives over a RAG framework — in the retrieval path only
+LlamaIndex and LangChain's retrieval abstractions reach a working pipeline
+far faster. Rejected for the **core retrieval path** because they hide
+precisely the mechanics this project exists to learn, and because the resume
+already claims RAG — it needs to survive interview probing, where
+`.as_query_engine()` is a bad answer.
+
+This is a scoped rejection, not a blanket one. Chunking, embedding calls,
+pgvector schema and indexing, BM25 fusion and reranking are all hand-written.
+**Orchestration is not retrieval**, so LangGraph running the graph around
+those hand-built components is consistent with this decision rather than a
+reversal of it. The boundary: LangGraph may move data between nodes; it may
+not be what retrieves.
 
 ### 9.2 pgvector + Elasticsearch over Pinecone
 Pinecone is already on the resume and hides index internals. Self-hosting
@@ -342,13 +367,27 @@ expertise reused for the sparse half of hybrid retrieval.
 
 ### 9.3 OpenAlgo over direct broker integration
 Broker auth across many brokers is a maintenance treadmill that OpenAlgo
-already solved well (34+ brokers). Nivesh consumes its unified local REST
+already solved well (34+ brokers). InvestiGate consumes its unified local REST
 API and inherits multi-broker support without owning credentials.
 
 ### 9.4 Separate critic call over single-prompt self-critique
 See 5.5.
 
-### 9.5 Anthropic-only in v1
+### 9.5 LangGraph over Temporal for orchestration
+Temporal is the stronger durable-execution engine and is existing expertise,
+which made it the original choice. Overridden deliberately: the career goal
+is agentic AI engineering, and LangGraph is what that market actually asks
+for — graph state, checkpointing, human-in-the-loop interrupts and
+tool-calling loops are agent-native concepts that Temporal expresses only
+generically. Building on LangGraph produces directly relevant evidence;
+building on Temporal produces evidence that needs translation in an
+interview.
+
+Cost accepted: weaker durability guarantees (§5.3). Existing Temporal
+experience remains a differentiator to talk about, not something this
+project needs to re-demonstrate.
+
+### 9.6 Anthropic-only in v1
 One provider, the user's own key. Provider-agnostic routing is a later
 phase; multi-provider prompt divergence is a distraction from the retrieval
 and evaluation work that matters here.
