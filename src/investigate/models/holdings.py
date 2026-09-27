@@ -1,6 +1,7 @@
 from datetime import datetime
-from typing import List
+
 from pydantic import BaseModel
+
 
 class Holding(BaseModel):
     ticker: str
@@ -9,7 +10,8 @@ class Holding(BaseModel):
     avg_price: float
     asset_type: str = "equity"
 
+
 class PortfolioSnapshot(BaseModel):
     as_of: datetime
     source: str
-    holdings: List[Holding]
+    holdings: list[Holding]

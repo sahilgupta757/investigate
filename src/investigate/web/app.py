@@ -1,43 +1,49 @@
+import os
+
 from fastapi import FastAPI, Request
 from fastapi.templating import Jinja2Templates
+
 from investigate.engine.portfolio import get_current_portfolio
-import os
 
 app = FastAPI()
 # Assuming the package structure is src/investigate/web/templates
-templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
+templates = Jinja2Templates(
+    directory=os.path.join(os.path.dirname(__file__), "templates")
+)
+
 
 @app.get("/")
 def dashboard(request: Request):
     openalgo_url = os.environ.get("OPENALGO_URL", "http://openalgo:5000")
     cache_path = os.environ.get("CACHE_PATH", "/app/data/cache.json")
-    
+
     snapshot, is_stale = get_current_portfolio(openalgo_url, cache_path)
-    
+
     if snapshot is None:
         return templates.TemplateResponse(
-            request=request,
-            name="dashboard.html", 
-            context={"empty_state": True}
+            request=request, name="dashboard.html", context={"empty_state": True}
         )
-        
+
     total_value = sum(h.quantity * h.avg_price for h in snapshot.holdings)
-    
+
     allocations = []
     if total_value > 0:
         allocations = [
-            {"ticker": h.ticker, "percentage": (h.quantity * h.avg_price / total_value) * 100}
+            {
+                "ticker": h.ticker,
+                "percentage": (h.quantity * h.avg_price / total_value) * 100,
+            }
             for h in snapshot.holdings
         ]
-        
+
     return templates.TemplateResponse(
         request=request,
-        name="dashboard.html", 
+        name="dashboard.html",
         context={
             "empty_state": False,
             "snapshot": snapshot,
             "is_stale": is_stale,
             "total_value": total_value,
-            "allocations": allocations
-        }
+            "allocations": allocations,
+        },
     )
