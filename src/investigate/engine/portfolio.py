@@ -14,5 +14,8 @@ def get_current_portfolio(
         save_snapshot(snapshot, cache_path)
         return snapshot, False
     except (httpx.RequestError, httpx.HTTPStatusError, ValidationError, Exception):
-        snapshot = load_snapshot(cache_path)
-        return snapshot, snapshot is not None
+        try:
+            snapshot = load_snapshot(cache_path)
+            return snapshot, snapshot is not None
+        except Exception:
+            return None, False

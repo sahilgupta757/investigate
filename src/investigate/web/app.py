@@ -24,18 +24,6 @@ def dashboard(request: Request):
             request=request, name="dashboard.html", context={"empty_state": True}
         )
 
-    total_value = sum(h.quantity * h.avg_price for h in snapshot.holdings)
-
-    allocations = []
-    if total_value > 0:
-        allocations = [
-            {
-                "ticker": h.ticker,
-                "percentage": (h.quantity * h.avg_price / total_value) * 100,
-            }
-            for h in snapshot.holdings
-        ]
-
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
@@ -43,7 +31,7 @@ def dashboard(request: Request):
             "empty_state": False,
             "snapshot": snapshot,
             "is_stale": is_stale,
-            "total_value": total_value,
-            "allocations": allocations,
+            "total_value": snapshot.total_value,
+            "allocations": snapshot.allocations,
         },
     )
