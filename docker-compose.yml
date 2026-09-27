@@ -1,0 +1,18 @@
+services:
+  openalgo:
+    image: marketcalls/openalgo:latest
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./openalgo-data:/app/data
+      - ./.env:/app/.env
+
+  investigate:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./src:/app/src
+      - ./data:/app/data
+    depends_on:
+      - openalgo
