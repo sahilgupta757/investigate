@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>InvestiGate Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <h1>Portfolio Dashboard</h1>
+    
+    {% if empty_state %}
+        <div style="padding: 20px; background: #fff3cd; border: 1px solid #ffeeba;">
+            <h3>Broker Session Expired</h3>
+            <p>Please log into OpenAlgo to connect the broker and refresh the cache.</p>
+        </div>
+    {% else %}
+        {% if is_stale %}
+        <div style="padding: 10px; background: #f8d7da; border: 1px solid #f5c6cb;">
+            <strong>Stale Data:</strong> as of {{ snapshot.as_of }} — broker session expired, reconnect to refresh.
+        </div>
+        {% endif %}
+        
+        <h2>Total Value: {{ "%.2f"|format(total_value) }}</h2>
+        
+        <table border="1">
+            <tr>
+                <th>Ticker</th>
+                <th>Quantity</th>
+                <th>Avg Price</th>
+                <th>Value</th>
+            </tr>
+            {% for holding in snapshot.holdings %}
+            <tr>
+                <td>{{ holding.ticker }}</td>
+                <td>{{ holding.quantity }}</td>
+                <td>{{ holding.avg_price }}</td>
+                <td>{{ "%.2f"|format(holding.quantity * holding.avg_price) }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+        
+        <div style="width: 400px; margin-top: 20px;">
+            <canvas id="allocationChart"></canvas>
+        </div>
+        
+        <script>
+            const allocations = {{ allocations | tojson }};
+            const labels = allocations.map(a => a.ticker);
+            const data = allocations.map(a => a.percentage);
+            
+            new Chart(document.getElementById('allocationChart'), {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: data,
+                    }]
+                }
+            });
+        </script>
+    {% endif %}
+</body>
+</html>
