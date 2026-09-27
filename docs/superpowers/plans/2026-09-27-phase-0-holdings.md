@@ -47,6 +47,7 @@ jinja2
 pytest
 pytest-mock
 respx
+ruff
 ```
 
 - [ ] **Step 2: Write `Dockerfile`**
@@ -185,14 +186,17 @@ git commit -m "feat: openalgo connector and file cache persistence"
 - Produces: `get_current_portfolio(openalgo_url: str, cache_path: str) -> tuple[PortfolioSnapshot | None, bool]`
 
 - [ ] **Step 1: Write the failing tests**
-Test `get_current_portfolio` fresh fetch (mock `fetch_holdings`). Test `get_current_portfolio` stale fallback (mock `fetch_holdings` to throw error, mock `load_snapshot` returning cache).
+Test `get_current_portfolio` fresh fetch (mock `fetch_holdings`). 
+Test `get_current_portfolio` stale fallback (mock `fetch_holdings` to throw an error, mock `load_snapshot` returning cache).
+Test `get_current_portfolio` validation fallback (mock `fetch_holdings` to throw `pydantic.ValidationError`, mock `load_snapshot` returning cache).
+Test `get_current_portfolio` empty state (mock `fetch_holdings` throws error, mock `load_snapshot` returns `None`).
 
 - [ ] **Step 2: Run test to verify it fails**
 Run: `pytest tests/engine/test_portfolio.py -v`
 Expected: FAIL
 
 - [ ] **Step 3: Implement `get_current_portfolio`**
-Implement the orchestration logic: fetch, if success save & return (snapshot, False). If error, load & return (snapshot, True).
+Implement the orchestration logic: fetch, if success save & return (snapshot, False). If it catches `httpx.RequestError`, `Exception`, or `pydantic.ValidationError`, call `load_snapshot` and return (snapshot, True) or (None, False) if cache is missing.
 
 - [ ] **Step 4: Run test to verify it passes**
 Run: `pytest tests/engine/test_portfolio.py -v`
@@ -201,7 +205,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 ```bash
 git add src/investigate/engine/portfolio.py tests/engine/test_portfolio.py
-git commit -m "feat: portfolio manager orchestration"
+git commit -m "feat: portfolio manager orchestration with error fallbacks"
 ```
 
 ### Task 5: FastAPI Application & Dashboard
@@ -215,22 +219,39 @@ git commit -m "feat: portfolio manager orchestration"
 - Consumes: `get_current_portfolio`
 - Produces: FastAPI app
 
-- [ ] **Step 1: Write the failing test**
-Use `TestClient` from FastAPI. Mock `get_current_portfolio`. Test `GET /` returns 200 and renders HTML.
+- [ ] **Step 1: Write the failing tests**
+Use `TestClient` from FastAPI. Mock `get_current_portfolio`. 
+Test 1: `GET /` returns 200 and renders HTML with holding tickers.
+Test 2: `GET /` returns 200 and renders empty state instructions when `get_current_portfolio` returns `(None, False)`.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run tests to verify they fail**
 Run: `pytest tests/web/test_app.py -v`
 Expected: FAIL
 
 - [ ] **Step 3: Implement FastAPI app and template**
-In `app.py`, define FastAPI app and Jinja2 templates. Pass computed totals and `is_stale` boolean to template. In `dashboard.html`, display the tables and banner.
+In `app.py`, define FastAPI app and Jinja2 templates. Pass computed totals, allocations, and `is_stale` boolean to template. 
+In `dashboard.html`, display the tables and banner. Explicitly include Chart.js via CDN (`<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>`) and render a donut chart mapping tickers to their allocation percentages. If empty state, display instructions to log into OpenAlgo.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 4: Run tests to verify they pass**
 Run: `pytest tests/web/test_app.py -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
 ```bash
 git add src/investigate/web/app.py src/investigate/web/templates/dashboard.html tests/web/test_app.py
-git commit -m "feat: fastApi dashboard"
+git commit -m "feat: fastApi dashboard with chart and empty state"
+```
+
+### Task 6: Formatting and Linting
+
+- [ ] **Step 1: Run ruff format and check**
+```bash
+ruff format src tests
+ruff check src tests --fix
+```
+
+- [ ] **Step 2: Commit**
+```bash
+git add src tests
+git commit -m "style: apply ruff formatting"
 ```
