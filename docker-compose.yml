@@ -16,5 +16,6 @@ services:
       - ./data:/app/data
     environment:
       - OPENALGO_API_KEY=1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
     depends_on:
       - openalgo

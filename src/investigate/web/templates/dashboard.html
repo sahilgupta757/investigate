@@ -3,6 +3,12 @@
 <head>
     <title>InvestiGate Dashboard</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .error-banner { padding: 15px; background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; display: none; margin-top: 10px; }
+        .review-box { margin-top: 20px; padding: 15px; border: 1px solid #ddd; background: #f9f9f9; display: none; }
+        .review-box h3 { margin-top: 0; }
+        .btn { padding: 10px 15px; background: #007bff; color: white; border: none; cursor: pointer; }
+    </style>
 </head>
 <body>
     <h1>Portfolio Dashboard</h1>
@@ -41,6 +47,21 @@
         <div style="width: 400px; margin-top: 20px;">
             <canvas id="allocationChart"></canvas>
         </div>
+
+        <div style="margin-top: 30px;">
+            <button id="runCheckBtn" class="btn" onclick="runFastPass()">Run AI Health Check</button>
+            <div id="errorBanner" class="error-banner"></div>
+            <div id="reviewBox" class="review-box">
+                <h3>Portfolio Review</h3>
+                <p><strong>Summary:</strong> <span id="reviewSummary"></span></p>
+                <p><strong>Strengths:</strong></p>
+                <ul id="reviewStrengths"></ul>
+                <p><strong>Concentration Risks:</strong></p>
+                <ul id="reviewRisks"></ul>
+                <p><strong>Valuation Anomalies:</strong></p>
+                <ul id="reviewAnomalies"></ul>
+            </div>
+        </div>
         
         <script>
             const allocations = {{ allocations | tojson }};
@@ -56,6 +77,50 @@
                     }]
                 }
             });
+
+            async function runFastPass() {
+                const btn = document.getElementById('runCheckBtn');
+                const errorBanner = document.getElementById('errorBanner');
+                const reviewBox = document.getElementById('reviewBox');
+                
+                btn.disabled = true;
+                btn.innerText = "Analyzing...";
+                errorBanner.style.display = 'none';
+                reviewBox.style.display = 'none';
+
+                try {
+                    const res = await fetch('/api/fast-pass', { method: 'POST' });
+                    const data = await res.json();
+                    
+                    if (!res.ok) {
+                        throw new Error(data.detail || 'An error occurred');
+                    }
+
+                    document.getElementById('reviewSummary').innerText = data.summary;
+                    
+                    const populateList = (id, items) => {
+                        const ul = document.getElementById(id);
+                        ul.innerHTML = '';
+                        items.forEach(item => {
+                            const li = document.createElement('li');
+                            li.innerText = item;
+                            ul.appendChild(li);
+                        });
+                    };
+
+                    populateList('reviewStrengths', data.strengths);
+                    populateList('reviewRisks', data.concentration_risks);
+                    populateList('reviewAnomalies', data.valuation_anomalies);
+                    
+                    reviewBox.style.display = 'block';
+                } catch (err) {
+                    errorBanner.innerText = err.message;
+                    errorBanner.style.display = 'block';
+                } finally {
+                    btn.disabled = false;
+                    btn.innerText = "Run AI Health Check";
+                }
+            }
         </script>
     {% endif %}
 </body>
