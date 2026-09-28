@@ -8,3 +8,4 @@ pytest-mock
 respx
 ruff
 yfinance
+openai
