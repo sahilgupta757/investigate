@@ -18,7 +18,7 @@ def test_get_portfolio_fresh():
         ) as mock_fetch,
         patch("investigate.engine.portfolio.save_snapshot") as mock_save,
     ):
-        snapshot, is_stale = get_current_portfolio("http://url", "cache.json")
+        snapshot, is_stale = get_current_portfolio("http://url", "dummy_key", "cache.json")
         assert not is_stale
         assert snapshot is dummy
         mock_save.assert_called_once_with(dummy, "cache.json")
@@ -37,7 +37,7 @@ def test_get_portfolio_stale_fallback():
             "investigate.engine.portfolio.load_snapshot", return_value=dummy_cache
         ) as mock_load,
     ):
-        snapshot, is_stale = get_current_portfolio("http://url", "cache.json")
+        snapshot, is_stale = get_current_portfolio("http://url", "dummy_key", "cache.json")
         assert is_stale
         assert snapshot is dummy_cache
         mock_load.assert_called_once_with("cache.json")
@@ -56,7 +56,7 @@ def test_get_portfolio_validation_fallback():
             "investigate.engine.portfolio.load_snapshot", return_value=dummy_cache
         ) as mock_load,
     ):
-        snapshot, is_stale = get_current_portfolio("http://url", "cache.json")
+        snapshot, is_stale = get_current_portfolio("http://url", "dummy_key", "cache.json")
         assert is_stale
         assert snapshot is dummy_cache
         mock_load.assert_called_once_with("cache.json")
@@ -70,6 +70,6 @@ def test_get_portfolio_empty_state():
         ),
         patch("investigate.engine.portfolio.load_snapshot", return_value=None),
     ):
-        snapshot, is_stale = get_current_portfolio("http://url", "cache.json")
+        snapshot, is_stale = get_current_portfolio("http://url", "dummy_key", "cache.json")
         assert not is_stale
         assert snapshot is None

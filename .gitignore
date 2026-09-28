@@ -42,3 +42,4 @@ snapshots/
 
 # Postgres / Docker volumes
 volumes/
+openalgo-data/

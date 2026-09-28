@@ -21,7 +21,7 @@ def test_fetch_holdings_success(respx_mock):
         return_value=httpx.Response(200, json=mock_data)
     )
 
-    snapshot = fetch_holdings("http://openalgo:5000")
+    snapshot = fetch_holdings("http://openalgo:5000", "dummy_key")
     assert len(snapshot.holdings) == 1
     assert snapshot.holdings[0].ticker == "TCS"
     assert snapshot.source == "openalgo"
@@ -32,7 +32,7 @@ def test_fetch_holdings_failure(respx_mock):
         return_value=httpx.Response(401)
     )
     with pytest.raises(httpx.HTTPStatusError):
-        fetch_holdings("http://openalgo:5000")
+        fetch_holdings("http://openalgo:5000", "dummy_key")
 
 
 def test_fetch_holdings_validation_error(respx_mock):
@@ -44,4 +44,4 @@ def test_fetch_holdings_validation_error(respx_mock):
         return_value=httpx.Response(200, json=mock_data)
     )
     with pytest.raises(ValidationError):
-        fetch_holdings("http://openalgo:5000")
+        fetch_holdings("http://openalgo:5000", "dummy_key")
