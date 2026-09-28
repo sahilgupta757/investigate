@@ -6,7 +6,7 @@ from investigate.models.holdings import Holding, PortfolioSnapshot
 
 
 def fetch_holdings(base_url: str, api_key: str) -> PortfolioSnapshot:
-    response = httpx.get(f"{base_url}/api/v1/holdings", params={"apikey": api_key})
+    response = httpx.post(f"{base_url}/api/v1/holdings", json={"apikey": api_key})
     response.raise_for_status()
 
     data = response.json()

@@ -1,0 +1,567 @@
+diff --git a/Dockerfile b/Dockerfile
+new file mode 100644
+index 0000000..40474f9
+--- /dev/null
++++ b/Dockerfile
+@@ -0,0 +1,7 @@
++FROM python:3.12-slim
++WORKDIR /app
++COPY requirements.txt .
++RUN pip install --no-cache-dir -r requirements.txt
++COPY . .
++ENV PYTHONPATH=/app/src
++CMD ["uvicorn", "investigate.web.app:app", "--host", "0.0.0.0", "--port", "8000"]
+diff --git a/docker-compose.yml b/docker-compose.yml
+new file mode 100644
+index 0000000..69a9ad6
+--- /dev/null
++++ b/docker-compose.yml
+@@ -0,0 +1,18 @@
++services:
++  openalgo:
++    image: marketcalls/openalgo:latest
++    ports:
++      - "5000:5000"
++    volumes:
++      - ./openalgo-data:/app/data
++      - ./.env:/app/.env
++
++  investigate:
++    build: .
++    ports:
++      - "8000:8000"
++    volumes:
++      - ./src:/app/src
++      - ./data:/app/data
++    depends_on:
++      - openalgo
+diff --git a/requirements.txt b/requirements.txt
+new file mode 100644
+index 0000000..4976cbf
+--- /dev/null
++++ b/requirements.txt
+@@ -0,0 +1,9 @@
++fastapi
++uvicorn
++pydantic>=2.0.0
++httpx
++jinja2
++pytest
++pytest-mock
++respx
++ruff
+diff --git a/src/__init__.py b/src/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/src/investigate/__init__.py b/src/investigate/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/src/investigate/connectors/__init__.py b/src/investigate/connectors/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/src/investigate/connectors/openalgo.py b/src/investigate/connectors/openalgo.py
+new file mode 100644
+index 0000000..66085f0
+--- /dev/null
++++ b/src/investigate/connectors/openalgo.py
+@@ -0,0 +1,28 @@
++from datetime import datetime, timezone
++
++import httpx
++
++from investigate.models.holdings import Holding, PortfolioSnapshot
++
++
++def fetch_holdings(base_url: str) -> PortfolioSnapshot:
++    response = httpx.get(f"{base_url}/api/v1/holdings")
++    response.raise_for_status()
++
++    data = response.json()
++    holdings = []
++
++    for item in data.get("holdings", []):
++        holdings.append(
++            Holding(
++                ticker=item.get("tradingsymbol"),
++                isin=item.get("isin"),
++                quantity=item.get("quantity"),
++                avg_price=item.get("average_price"),
++                asset_type="equity",
++            )
++        )
++
++    return PortfolioSnapshot(
++        as_of=datetime.now(timezone.utc), source="openalgo", holdings=holdings
++    )
+diff --git a/src/investigate/engine/__init__.py b/src/investigate/engine/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/src/investigate/engine/portfolio.py b/src/investigate/engine/portfolio.py
+new file mode 100644
+index 0000000..3a0dbdd
+--- /dev/null
++++ b/src/investigate/engine/portfolio.py
+@@ -0,0 +1,18 @@
++import httpx
++from pydantic import ValidationError
++
++from investigate.connectors.openalgo import fetch_holdings
++from investigate.models.holdings import PortfolioSnapshot
++from investigate.storage.cache import load_snapshot, save_snapshot
++
++
++def get_current_portfolio(
++    openalgo_url: str, cache_path: str
++) -> tuple[PortfolioSnapshot | None, bool]:
++    try:
++        snapshot = fetch_holdings(openalgo_url)
++        save_snapshot(snapshot, cache_path)
++        return snapshot, False
++    except (httpx.RequestError, httpx.HTTPStatusError, ValidationError, Exception):
++        snapshot = load_snapshot(cache_path)
++        return snapshot, snapshot is not None
+diff --git a/src/investigate/models/__init__.py b/src/investigate/models/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/src/investigate/models/holdings.py b/src/investigate/models/holdings.py
+new file mode 100644
+index 0000000..6e77e9c
+--- /dev/null
++++ b/src/investigate/models/holdings.py
+@@ -0,0 +1,17 @@
++from datetime import datetime
++
++from pydantic import BaseModel
++
++
++class Holding(BaseModel):
++    ticker: str
++    isin: str
++    quantity: float
++    avg_price: float
++    asset_type: str = "equity"
++
++
++class PortfolioSnapshot(BaseModel):
++    as_of: datetime
++    source: str
++    holdings: list[Holding]
+diff --git a/src/investigate/storage/__init__.py b/src/investigate/storage/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/src/investigate/storage/cache.py b/src/investigate/storage/cache.py
+new file mode 100644
+index 0000000..18e1030
+--- /dev/null
++++ b/src/investigate/storage/cache.py
+@@ -0,0 +1,17 @@
++import os
++
++from investigate.models.holdings import PortfolioSnapshot
++
++
++def save_snapshot(snapshot: PortfolioSnapshot, filepath: str) -> None:
++    os.makedirs(os.path.dirname(filepath), exist_ok=True)
++    with open(filepath, "w") as f:
++        f.write(snapshot.model_dump_json())
++
++
++def load_snapshot(filepath: str) -> PortfolioSnapshot | None:
++    if not os.path.exists(filepath):
++        return None
++    with open(filepath, "r") as f:
++        content = f.read()
++    return PortfolioSnapshot.model_validate_json(content)
+diff --git a/src/investigate/web/__init__.py b/src/investigate/web/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/src/investigate/web/app.py b/src/investigate/web/app.py
+new file mode 100644
+index 0000000..6845016
+--- /dev/null
++++ b/src/investigate/web/app.py
+@@ -0,0 +1,49 @@
++import os
++
++from fastapi import FastAPI, Request
++from fastapi.templating import Jinja2Templates
++
++from investigate.engine.portfolio import get_current_portfolio
++
++app = FastAPI()
++# Assuming the package structure is src/investigate/web/templates
++templates = Jinja2Templates(
++    directory=os.path.join(os.path.dirname(__file__), "templates")
++)
++
++
++@app.get("/")
++def dashboard(request: Request):
++    openalgo_url = os.environ.get("OPENALGO_URL", "http://openalgo:5000")
++    cache_path = os.environ.get("CACHE_PATH", "/app/data/cache.json")
++
++    snapshot, is_stale = get_current_portfolio(openalgo_url, cache_path)
++
++    if snapshot is None:
++        return templates.TemplateResponse(
++            request=request, name="dashboard.html", context={"empty_state": True}
++        )
++
++    total_value = sum(h.quantity * h.avg_price for h in snapshot.holdings)
++
++    allocations = []
++    if total_value > 0:
++        allocations = [
++            {
++                "ticker": h.ticker,
++                "percentage": (h.quantity * h.avg_price / total_value) * 100,
++            }
++            for h in snapshot.holdings
++        ]
++
++    return templates.TemplateResponse(
++        request=request,
++        name="dashboard.html",
++        context={
++            "empty_state": False,
++            "snapshot": snapshot,
++            "is_stale": is_stale,
++            "total_value": total_value,
++            "allocations": allocations,
++        },
++    )
+diff --git a/src/investigate/web/templates/dashboard.html b/src/investigate/web/templates/dashboard.html
+new file mode 100644
+index 0000000..e2a1734
+--- /dev/null
++++ b/src/investigate/web/templates/dashboard.html
+@@ -0,0 +1,62 @@
++<!DOCTYPE html>
++<html>
++<head>
++    <title>InvestiGate Dashboard</title>
++    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
++</head>
++<body>
++    <h1>Portfolio Dashboard</h1>
++    
++    {% if empty_state %}
++        <div style="padding: 20px; background: #fff3cd; border: 1px solid #ffeeba;">
++            <h3>Broker Session Expired</h3>
++            <p>Please log into OpenAlgo to connect the broker and refresh the cache.</p>
++        </div>
++    {% else %}
++        {% if is_stale %}
++        <div style="padding: 10px; background: #f8d7da; border: 1px solid #f5c6cb;">
++            <strong>Stale Data:</strong> as of {{ snapshot.as_of }} — broker session expired, reconnect to refresh.
++        </div>
++        {% endif %}
++        
++        <h2>Total Value: {{ "%.2f"|format(total_value) }}</h2>
++        
++        <table border="1">
++            <tr>
++                <th>Ticker</th>
++                <th>Quantity</th>
++                <th>Avg Price</th>
++                <th>Value</th>
++            </tr>
++            {% for holding in snapshot.holdings %}
++            <tr>
++                <td>{{ holding.ticker }}</td>
++                <td>{{ holding.quantity }}</td>
++                <td>{{ holding.avg_price }}</td>
++                <td>{{ "%.2f"|format(holding.quantity * holding.avg_price) }}</td>
++            </tr>
++            {% endfor %}
++        </table>
++        
++        <div style="width: 400px; margin-top: 20px;">
++            <canvas id="allocationChart"></canvas>
++        </div>
++        
++        <script>
++            const allocations = {{ allocations | tojson }};
++            const labels = allocations.map(a => a.ticker);
++            const data = allocations.map(a => a.percentage);
++            
++            new Chart(document.getElementById('allocationChart'), {
++                type: 'doughnut',
++                data: {
++                    labels: labels,
++                    datasets: [{
++                        data: data,
++                    }]
++                }
++            });
++        </script>
++    {% endif %}
++</body>
++</html>
+diff --git a/tests/__init__.py b/tests/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/tests/connectors/__init__.py b/tests/connectors/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/tests/connectors/test_openalgo.py b/tests/connectors/test_openalgo.py
+new file mode 100644
+index 0000000..78e3ff3
+--- /dev/null
++++ b/tests/connectors/test_openalgo.py
+@@ -0,0 +1,47 @@
++import httpx
++import pytest
++from pydantic import ValidationError
++
++from investigate.connectors.openalgo import fetch_holdings
++
++
++def test_fetch_holdings_success(respx_mock):
++    mock_data = {
++        "holdings": [
++            {
++                "tradingsymbol": "TCS",
++                "isin": "INE467B01029",
++                "quantity": 50,
++                "average_price": 3500.0,
++                "instrument_token": 123,
++            }
++        ]
++    }
++    respx_mock.get("http://openalgo:5000/api/v1/holdings").mock(
++        return_value=httpx.Response(200, json=mock_data)
++    )
++
++    snapshot = fetch_holdings("http://openalgo:5000")
++    assert len(snapshot.holdings) == 1
++    assert snapshot.holdings[0].ticker == "TCS"
++    assert snapshot.source == "openalgo"
++
++
++def test_fetch_holdings_failure(respx_mock):
++    respx_mock.get("http://openalgo:5000/api/v1/holdings").mock(
++        return_value=httpx.Response(401)
++    )
++    with pytest.raises(httpx.HTTPStatusError):
++        fetch_holdings("http://openalgo:5000")
++
++
++def test_fetch_holdings_validation_error(respx_mock):
++    # Missing 'average_price'
++    mock_data = {
++        "holdings": [{"tradingsymbol": "TCS", "isin": "INE467B01029", "quantity": 50}]
++    }
++    respx_mock.get("http://openalgo:5000/api/v1/holdings").mock(
++        return_value=httpx.Response(200, json=mock_data)
++    )
++    with pytest.raises(ValidationError):
++        fetch_holdings("http://openalgo:5000")
+diff --git a/tests/engine/__init__.py b/tests/engine/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/tests/engine/test_portfolio.py b/tests/engine/test_portfolio.py
+new file mode 100644
+index 0000000..5861be7
+--- /dev/null
++++ b/tests/engine/test_portfolio.py
+@@ -0,0 +1,63 @@
++from datetime import datetime, timezone
++from unittest.mock import patch
++
++import httpx
++from pydantic import ValidationError
++
++from investigate.engine.portfolio import get_current_portfolio
++from investigate.models.holdings import PortfolioSnapshot
++
++
++def test_get_portfolio_fresh():
++    dummy = PortfolioSnapshot(
++        as_of=datetime.now(timezone.utc), source="openalgo", holdings=[]
++    )
++    with patch(
++        "investigate.engine.portfolio.fetch_holdings", return_value=dummy
++    ) as mock_fetch, patch("investigate.engine.portfolio.save_snapshot") as mock_save:
++        snapshot, is_stale = get_current_portfolio("http://url", "cache.json")
++        assert not is_stale
++        assert snapshot is dummy
++        mock_save.assert_called_once_with(dummy, "cache.json")
++
++
++def test_get_portfolio_stale_fallback():
++    dummy_cache = PortfolioSnapshot(
++        as_of=datetime.now(timezone.utc), source="openalgo", holdings=[]
++    )
++    with patch(
++        "investigate.engine.portfolio.fetch_holdings",
++        side_effect=httpx.RequestError("error"),
++    ), patch(
++        "investigate.engine.portfolio.load_snapshot", return_value=dummy_cache
++    ) as mock_load:
++        snapshot, is_stale = get_current_portfolio("http://url", "cache.json")
++        assert is_stale
++        assert snapshot is dummy_cache
++        mock_load.assert_called_once_with("cache.json")
++
++
++def test_get_portfolio_validation_fallback():
++    dummy_cache = PortfolioSnapshot(
++        as_of=datetime.now(timezone.utc), source="openalgo", holdings=[]
++    )
++    with patch(
++        "investigate.engine.portfolio.fetch_holdings",
++        side_effect=ValidationError.from_exception_data("error", []),
++    ), patch(
++        "investigate.engine.portfolio.load_snapshot", return_value=dummy_cache
++    ) as mock_load:
++        snapshot, is_stale = get_current_portfolio("http://url", "cache.json")
++        assert is_stale
++        assert snapshot is dummy_cache
++        mock_load.assert_called_once_with("cache.json")
++
++
++def test_get_portfolio_empty_state():
++    with patch(
++        "investigate.engine.portfolio.fetch_holdings",
++        side_effect=httpx.RequestError("error"),
++    ), patch("investigate.engine.portfolio.load_snapshot", return_value=None):
++        snapshot, is_stale = get_current_portfolio("http://url", "cache.json")
++        assert not is_stale
++        assert snapshot is None
+diff --git a/tests/models/__init__.py b/tests/models/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/tests/models/test_holdings.py b/tests/models/test_holdings.py
+new file mode 100644
+index 0000000..f3d2913
+--- /dev/null
++++ b/tests/models/test_holdings.py
+@@ -0,0 +1,28 @@
++from datetime import datetime, timezone
++
++import pytest
++from pydantic import ValidationError
++
++from investigate.models.holdings import Holding, PortfolioSnapshot
++
++
++def test_portfolio_snapshot_creation():
++    holding = Holding(
++        ticker="RELIANCE",
++        isin="INE002A01018",
++        quantity=10,
++        avg_price=2500.50,
++        asset_type="equity",
++    )
++    snapshot = PortfolioSnapshot(
++        as_of=datetime(2026, 9, 21, 12, 0, tzinfo=timezone.utc),
++        source="openalgo",
++        holdings=[holding],
++    )
++    assert snapshot.holdings[0].ticker == "RELIANCE"
++    assert snapshot.source == "openalgo"
++
++
++def test_holding_validation_missing_fields():
++    with pytest.raises(ValidationError):
++        Holding(ticker="RELIANCE", quantity=10)  # missing isin, avg_price
+diff --git a/tests/storage/__init__.py b/tests/storage/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/tests/storage/test_cache.py b/tests/storage/test_cache.py
+new file mode 100644
+index 0000000..fb7dadc
+--- /dev/null
++++ b/tests/storage/test_cache.py
+@@ -0,0 +1,33 @@
++from datetime import datetime, timezone
++
++from investigate.models.holdings import Holding, PortfolioSnapshot
++from investigate.storage.cache import load_snapshot, save_snapshot
++
++
++def test_save_and_load_snapshot(tmp_path):
++    filepath = tmp_path / "cache.json"
++    snapshot = PortfolioSnapshot(
++        as_of=datetime(2026, 9, 21, 12, 0, tzinfo=timezone.utc),
++        source="openalgo",
++        holdings=[
++            Holding(
++                ticker="HDFC",
++                isin="123",
++                quantity=10,
++                avg_price=100.0,
++                asset_type="equity",
++            )
++        ],
++    )
++    save_snapshot(snapshot, str(filepath))
++
++    loaded = load_snapshot(str(filepath))
++    assert loaded is not None
++    assert loaded.holdings[0].ticker == "HDFC"
++    assert loaded.as_of == snapshot.as_of
++
++
++def test_load_nonexistent_snapshot(tmp_path):
++    filepath = tmp_path / "does_not_exist.json"
++    loaded = load_snapshot(str(filepath))
++    assert loaded is None
+diff --git a/tests/web/__init__.py b/tests/web/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/tests/web/test_app.py b/tests/web/test_app.py
+new file mode 100644
+index 0000000..6148c2a
+--- /dev/null
++++ b/tests/web/test_app.py
+@@ -0,0 +1,48 @@
++from datetime import datetime, timezone
++from unittest.mock import patch
++
++from fastapi.testclient import TestClient
++
++from investigate.models.holdings import Holding, PortfolioSnapshot
++
++
++def test_dashboard_renders():
++    # we must import app inside or patch before import if app initializes during import.
++    # To be safe, patch first.
++    with patch("investigate.web.app.get_current_portfolio") as mock_get:
++        dummy = PortfolioSnapshot(
++            as_of=datetime.now(timezone.utc),
++            source="openalgo",
++            holdings=[
++                Holding(
++                    ticker="RELIANCE",
++                    isin="123",
++                    quantity=10,
++                    avg_price=2500,
++                    asset_type="equity",
++                )
++            ],
++        )
++        mock_get.return_value = (dummy, False)
++
++        from investigate.web.app import app
++
++        client = TestClient(app)
++        response = client.get("/")
++        assert response.status_code == 200
++        assert "RELIANCE" in response.text
++        assert "Chart.js" in response.text or "chart.js" in response.text
++
++
++def test_dashboard_empty_state():
++    with patch("investigate.web.app.get_current_portfolio") as mock_get:
++        mock_get.return_value = (None, False)
++        from investigate.web.app import app
++
++        client = TestClient(app)
++        response = client.get("/")
++        assert response.status_code == 200
++        assert (
++            "log into OpenAlgo" in response.text
++            or "connect the broker" in response.text
++        )
