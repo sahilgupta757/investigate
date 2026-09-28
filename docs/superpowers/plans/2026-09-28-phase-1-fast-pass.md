@@ -4,9 +4,9 @@
 
 **Goal:** Implement a fast, structured portfolio health check that uses `yfinance` to enrich the portfolio, an LLM to evaluate it, and a hard-gate validator to prevent numeric hallucinations.
 
-**Architecture:** A three-stage pipeline. The `enrichment` module builds a deterministic Facts Payload. The `prompts` module passes this payload to Gemini (using `google-genai` structured outputs). The `validator` module intercepts the response, extracting all numbers via regex and enforcing exact or rounded matches against the payload.
+**Architecture:** A three-stage pipeline. The `enrichment` module builds a deterministic Facts Payload. The `prompts` module passes this payload to OpenRouter (using the `openai` SDK with JSON response formats). The `validator` module intercepts the response, extracting all numbers via regex and enforcing exact or rounded matches against the payload.
 
-**Tech Stack:** `yfinance`, `google-genai`, `pydantic`, `re`
+**Tech Stack:** `yfinance`, `openai`, `pydantic`, `re`
 
 **Spec:** `docs/superpowers/specs/2026-09-28-phase-1-fast-pass-spec.md`
 
@@ -14,7 +14,7 @@
 
 - Must run completely offline from the broker (using the cached snapshot).
 - No arithmetic logic permitted in the LLM.
-- Model must use Gemini via the official `google-genai` SDK.
+- Model must use OpenRouter via the official `openai` SDK pointing to `https://openrouter.ai/api/v1`.
 - The grounding validator must raise an exception on failure, not silently redact.
 
 ## Review Focus
@@ -147,9 +147,9 @@ git commit -m "feat: implement grounding validator"
 - Consumes: `FactsPayload` and `validate_grounding`.
 - Produces: `PortfolioReview` (Pydantic) and `generate_fast_pass(facts: FactsPayload, api_key: str) -> PortfolioReview`
 
-- [ ] **Step 1: Add `google-genai` to dependencies**
+- [ ] **Step 1: Add `openai` to dependencies**
 
-Add `google-genai` to `requirements.txt` and install it.
+Add `openai` to `requirements.txt` and install it.
 
 - [ ] **Step 2: Write the failing test**
 
@@ -160,10 +160,10 @@ from investigate.engine.enrichment import FactsPayload
 def test_generate_fast_pass(mocker):
     facts = FactsPayload(total_value=100.0, holdings_data={})
     
-    mock_client = mocker.patch("google.genai.Client")
-    mock_response = mocker.MagicMock()
-    mock_response.text = '{"summary": "Good", "strengths": [], "concentration_risks": [], "valuation_anomalies": []}'
-    mock_client.return_value.models.generate_content.return_value = mock_response
+    mock_client = mocker.patch("openai.OpenAI")
+    mock_choice = mocker.MagicMock()
+    mock_choice.message.content = '{"summary": "Good", "strengths": [], "concentration_risks": [], "valuation_anomalies": []}'
+    mock_client.return_value.chat.completions.create.return_value.choices = [mock_choice]
     
     mocker.patch("investigate.engine.prompts.validate_grounding")
     
@@ -179,11 +179,11 @@ Expected: FAIL
 - [ ] **Step 4: Implement LLM caller in `src/investigate/engine/prompts.py`**
 
 Define `PortfolioReview` Pydantic model with fields: `summary`, `strengths`, `concentration_risks`, `valuation_anomalies`.
-Create a system instruction requiring the model to handle `null` gracefully, and crucially, to NOT output numbers with formatting suffixes (like "B" or "M") so the numeric validator can verify raw quantities perfectly.
-Initialize `google.genai.Client(api_key=api_key)`.
-Call `models.generate_content(model='gemini-2.5-flash', contents=..., config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=PortfolioReview, system_instruction=...))`.
-Pass `response.text` to `validate_grounding(response.text, facts)`.
-Return `PortfolioReview.model_validate_json(response.text)`.
+Create a system instruction requiring the model to handle `null` gracefully, to NOT output numbers with formatting suffixes (like "B" or "M") so the numeric validator can verify raw quantities perfectly, and to output JSON matching the PortfolioReview schema.
+Initialize `openai.OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)`.
+Call `chat.completions.create(model='google/gemini-2.5-flash', response_format={"type": "json_object"}, messages=...)`.
+Pass `response.choices[0].message.content` to `validate_grounding(..., facts)`.
+Return `PortfolioReview.model_validate_json(...)`.
 
 - [ ] **Step 5: Run test to verify it passes**
 
@@ -194,7 +194,7 @@ Expected: PASS
 
 ```bash
 git add requirements.txt src/investigate/engine/prompts.py tests/engine/test_prompts.py
-git commit -m "feat: implement Gemini LLM integration for fast pass"
+git commit -m "feat: implement OpenRouter LLM integration for fast pass"
 ```
 
 ---
@@ -204,13 +204,14 @@ git commit -m "feat: implement Gemini LLM integration for fast pass"
 **Files:**
 - Modify: `src/investigate/web/app.py`
 - Modify: `src/investigate/web/templates/dashboard.html`
+- Modify: `docker-compose.yml`
 
 **Interfaces:**
 - Consumes: `generate_fast_pass` and `build_facts_payload`.
 
-- [ ] **Step 1: Add GEMINI_API_KEY to `.env` requirement**
+- [ ] **Step 1: Add OPENROUTER_API_KEY to `.env` requirement**
 
-Update `docker-compose.yml` and `app.py` to require `GEMINI_API_KEY`.
+Update `docker-compose.yml` and `app.py` to require `OPENROUTER_API_KEY`.
 
 - [ ] **Step 2: Add Fast Pass endpoint to `app.py`**
 

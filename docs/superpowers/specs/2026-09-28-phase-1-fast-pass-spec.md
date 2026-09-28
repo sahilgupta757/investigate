@@ -17,7 +17,8 @@ Three new core modules in `src/investigate/engine/`:
 - Bundles everything into a flat, structured dictionary/Pydantic model called `FactsPayload`.
 
 ### 2.2 `prompts.py` (LLM Integration)
-- Connects to the LLM natively using the `google-genai` SDK.
+- Connects to the LLM via OpenRouter using the `openai` Python SDK.
+- Targets `google/gemini-2.5-flash` or similar free tier models.
 - Defines a strict `PortfolioReview` Pydantic schema for structured output (e.g., summary, strengths, concentration_risks, valuation_anomalies).
 - Instructs the LLM to handle `null` fields gracefully and to avoid using formatting suffixes for numbers (like 'M' or 'B') so the validator can parse them.
 - Feeds the `FactsPayload` as JSON to the LLM and prompts it for the review.
