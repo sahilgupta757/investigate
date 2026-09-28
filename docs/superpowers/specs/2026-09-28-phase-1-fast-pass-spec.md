@@ -12,19 +12,21 @@ Three new core modules in `src/investigate/engine/`:
 ### 2.1 `enrichment.py` (Facts Payload Builder)
 - Takes a `PortfolioSnapshot`.
 - Uses `yfinance` to fetch current price, sector, trailing P/E, market cap, and 52-week high/low for each ticker.
-- Appends `.NS` or `.BO` to Indian tickers.
+- Tries `.NS` first for Indian tickers, falls back to `.BO`.
 - Calculates portfolio allocations (percentages) deterministically.
 - Bundles everything into a flat, structured dictionary/Pydantic model called `FactsPayload`.
 
 ### 2.2 `prompts.py` (LLM Integration)
-- Connects to the LLM (using the `google-genai` SDK or OpenRouter as fallback).
+- Connects to the LLM natively using the `google-genai` SDK.
 - Defines a strict `PortfolioReview` Pydantic schema for structured output (e.g., summary, strengths, concentration_risks, valuation_anomalies).
+- Instructs the LLM to handle `null` fields gracefully and to avoid using formatting suffixes for numbers (like 'M' or 'B') so the validator can parse them.
 - Feeds the `FactsPayload` as JSON to the LLM and prompts it for the review.
 
 ### 2.3 `validator.py` (Grounding Validator)
 - Intercepts the LLM's raw text/JSON response.
 - Extracts all numeric tokens using regex (e.g., `[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?`).
-- Asserts each extracted number exists in the `FactsPayload` values (allowing for reasonable decimal rounding, e.g., matching `17.3` to `17.34`).
+- Asserts each extracted number exists in the `FactsPayload` values by recursively scanning the payload dict.
+- Uses `math.isclose` to allow for reasonable decimal rounding (e.g., matching `17.3` to `17.34`).
 - **Hard Gate:** If any number is unmatched, it raises a `HallucinationError`. The system will fail loudly rather than showing ungrounded numbers to the user.
 
 ## 3. Data Flow

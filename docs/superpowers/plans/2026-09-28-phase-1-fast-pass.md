@@ -21,7 +21,6 @@
 
 - **yfinance Network Failure:** A ticker might not exist or the network might time out. The payload should insert `None` and the validator/LLM should survive. Test: Mock `yfinance.Ticker.info` to raise an Exception.
 - **Validator Tolerance:** The LLM might output `17.3` for `17.34`. The validator should use a tolerance matching logic (e.g. `math.isclose` or string prefix). Test: Pass `17.34` in payload and `17.3` in prose.
-- **Negative and Large Numbers:** The regex must catch negative numbers (`-50`), percentages (`50%`), and large numbers (`1.5B` or `1500000`). Test: Validate negative returns and large caps.
 - **Empty Portfolio:** The cache might have zero holdings. The fast pass should return a trivial empty review rather than crashing. Test: Pass an empty snapshot.
 
 ---
@@ -51,11 +50,12 @@ def test_build_facts_payload_success(mocker):
     )
     
     mock_ticker = mocker.patch("yfinance.Ticker")
-    mock_ticker.return_value.info = {"sector": "Energy", "trailingPE": 20.5, "marketCap": 1000000}
+    mock_ticker.return_value.info = {"sector": "Energy", "trailingPE": 20.5, "marketCap": 1000000, "currentPrice": 2600.0, "fiftyTwoWeekHigh": 3000.0, "fiftyTwoWeekLow": 2000.0}
     
     payload = build_facts_payload(snapshot)
     assert payload.total_value == 25000.0
     assert payload.holdings_data["RELIANCE"].sector == "Energy"
+    assert payload.holdings_data["RELIANCE"].current_price == 2600.0
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -65,7 +65,7 @@ Expected: FAIL with "ModuleNotFoundError" or similar.
 
 - [ ] **Step 3: Implement `FactsPayload` and `build_facts_payload` in `src/investigate/engine/enrichment.py`**
 
-Define `EnrichedHolding` and `FactsPayload` Pydantic models. Iterate over the snapshot, query `yfinance.Ticker(f"{h.ticker}.NS")`, handle `Exception` by using `None` for fields, calculate `total_value` and individual `allocation_percentage`, and return the `FactsPayload`.
+Define `EnrichedHolding` and `FactsPayload` Pydantic models. Include fields: `sector`, `pe_ratio`, `market_cap`, `current_price`, `fifty_two_week_high`, `fifty_two_week_low`, `allocation_percentage`. Iterate over the snapshot, query `yfinance.Ticker(f"{h.ticker}.NS")`, fallback to `.BO` if `.NS` throws or returns empty. Handle `Exception` by using `None` for fields, calculate `total_value` and individual `allocation_percentage`, and return the `FactsPayload`.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -99,7 +99,7 @@ from investigate.engine.validator import validate_grounding, HallucinationError
 from investigate.engine.enrichment import FactsPayload, EnrichedHolding
 
 def test_validate_grounding_success():
-    facts = FactsPayload(total_value=100.5, holdings_data={"A": EnrichedHolding(sector="Tech", market_cap=50.0, pe_ratio=15.2, current_price=10.0, allocation_percentage=100.0)})
+    facts = FactsPayload(total_value=100.5, holdings_data={"A": EnrichedHolding(sector="Tech", market_cap=50.0, pe_ratio=15.2, current_price=10.0, allocation_percentage=100.0, fifty_two_week_high=20.0, fifty_two_week_low=5.0)})
     review = '{"summary": "Total is 100.5 and PE is 15.2"}'
     validate_grounding(review, facts)  # Should not raise
 
@@ -119,7 +119,7 @@ Expected: FAIL
 
 Define `HallucinationError(Exception)`.
 Use `re.findall(r'[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?', review_json)`.
-Flatten `FactsPayload.model_dump()` to get a set of all valid numbers (floats/ints).
+Write a recursive function to walk `FactsPayload.model_dump()` to gather a set of all valid numbers (floats/ints).
 For each extracted string, cast to float. If it doesn't match any valid number (using `math.isclose(extracted, valid, rel_tol=1e-2)` to allow minor rounding), raise `HallucinationError`.
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -162,7 +162,7 @@ def test_generate_fast_pass(mocker):
     
     mock_client = mocker.patch("google.genai.Client")
     mock_response = mocker.MagicMock()
-    mock_response.text = '{"summary": "Good", "strengths": [], "risks": [], "anomalies": []}'
+    mock_response.text = '{"summary": "Good", "strengths": [], "concentration_risks": [], "valuation_anomalies": []}'
     mock_client.return_value.models.generate_content.return_value = mock_response
     
     mocker.patch("investigate.engine.prompts.validate_grounding")
@@ -178,9 +178,10 @@ Expected: FAIL
 
 - [ ] **Step 4: Implement LLM caller in `src/investigate/engine/prompts.py`**
 
-Define `PortfolioReview` Pydantic model.
+Define `PortfolioReview` Pydantic model with fields: `summary`, `strengths`, `concentration_risks`, `valuation_anomalies`.
+Create a system instruction requiring the model to handle `null` gracefully, and crucially, to NOT output numbers with formatting suffixes (like "B" or "M") so the numeric validator can verify raw quantities perfectly.
 Initialize `google.genai.Client(api_key=api_key)`.
-Call `models.generate_content(model='gemini-2.5-flash', contents=..., config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=PortfolioReview))`.
+Call `models.generate_content(model='gemini-2.5-flash', contents=..., config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=PortfolioReview, system_instruction=...))`.
 Pass `response.text` to `validate_grounding(response.text, facts)`.
 Return `PortfolioReview.model_validate_json(response.text)`.
 
