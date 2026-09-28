@@ -17,3 +17,13 @@ def test_generate_fast_pass(mocker):
     
     review = generate_fast_pass(facts, "dummy_key")
     assert review.summary == "Good"
+
+def test_generate_fast_pass_empty_portfolio(mocker):
+    facts = FactsPayload(total_value=0.0, holdings_data={})
+    
+    # Should not call the API
+    mock_client = mocker.patch("openai.OpenAI")
+    
+    review = generate_fast_pass(facts, "dummy_key")
+    assert review.summary == "Portfolio is empty."
+    assert not mock_client.called

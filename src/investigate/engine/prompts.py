@@ -22,10 +22,6 @@ CRITICAL RULES:
 """
 
 def generate_fast_pass(facts: FactsPayload, api_key: str) -> PortfolioReview:
-    client = openai.OpenAI(
-        base_url="https://openrouter.ai/api/v1",
-        api_key=api_key,
-    )
     
     # Empty portfolio handling
     if facts.total_value <= 0 or not facts.holdings_data:
@@ -36,6 +32,11 @@ def generate_fast_pass(facts: FactsPayload, api_key: str) -> PortfolioReview:
             valuation_anomalies=[]
         )
         
+    client = openai.OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=api_key,
+    )
+
     facts_json = facts.model_dump_json()
 
     response = client.chat.completions.create(
